@@ -24,6 +24,8 @@ namespace Download_Sun_Crossword
             var words = copy.words;
             var convertedCrossword = new CrosswordModelJson();
             convertedCrossword.datePublished = DateTime.Parse(copy.datepublish);
+            convertedCrossword.dateStarted = null;
+            convertedCrossword.duration = 0;
             convertedCrossword.title = "Sun " + copy.title;
             convertedCrossword.id = "Sun" + copy.id;
             convertedCrossword.grid = grid.Select(row =>

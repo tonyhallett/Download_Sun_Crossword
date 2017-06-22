@@ -10,6 +10,10 @@ namespace Download_Sun_Crossword
         public string id;
         public string title;
         public DateTime datePublished;
+        public DateTime? dateStarted;
+        //will have to decide upon correct datatype
+        //if ever read from firebase - for upload this will always be 0
+        public int duration;
         public int solvingMode;
         public CrosswordModelJson()
         {
@@ -56,6 +60,10 @@ namespace Download_Sun_Crossword
         public string id;
         public string title;
         public DateTime datePublished;
+        public DateTime? dateStarted;
+        //will have to decide upon correct datatype
+        //if ever read from firebase - for upload this will always be 0
+        public int duration;
     }
     public class CrosswordFirebaseRoot
     {

@@ -6,6 +6,7 @@ using System;
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.Data;
+using System.Diagnostics;
 using System.Drawing;
 using System.IO;
 using System.Linq;
@@ -30,6 +31,7 @@ namespace Download_Sun_Crossword
             UpdateSunCrosswords();
         }
 
+        
         private void UpdateSunCrosswords()
         {
             var sunCrosswords = GetNewSunCrosswords();
@@ -92,13 +94,57 @@ namespace Download_Sun_Crossword
 
         }
 
+        //************************************************** if have to rebuild
+        private async void DeleteMyCrosswords()
+        {
+            var firebaseClient = GetAuthenticatedDatabaseClient();
+            var myUserId = "1MbkNmDmzUUJP7yW8l4oB3AaNH62";
+            var userMeRef = "users/" + myUserId + "/";
+            var toDelete = new[] { firebaseClient.Child(userMeRef + "crosswordLookups"), firebaseClient.Child(userMeRef + "crosswords") };
+            try
+            {
+                await toDelete[0].DeleteAsync();
+                await toDelete[1].DeleteAsync();
+                var stop = "";
+            }catch(Exception exc)
+            {
+                var message = exc.Message;
+                var st = "";
+            }
+        }
+        private async void DeletePublic()
+        {
+            var firebaseClient = GetAuthenticatedDatabaseClient();
+            
+            var toDelete = new[] { firebaseClient.Child("crosswordLookups"), firebaseClient.Child("crosswords") };
+            try
+            {
+                await toDelete[0].DeleteAsync();
+                await toDelete[1].DeleteAsync();
+                var stop = "";
+            }
+            catch (Exception exc)
+            {
+                var message = exc.Message;
+                var st = "";
+            }
+        }
+        private void UpdateSunCrosswordsFromExisting()
+        {
+            var sunCrosswords = GetExistingSunCrosswords();
+            var crosswords = ConvertSunCrosswords(sunCrosswords);
+            SaveConvertedSunCrosswords(crosswords);
+            UploadCrosswordsToFirebase(crosswords);
+        }
+        //*******************************************************
 
-        //for Linq purposes - for when require stats on existing crosswords
         private List<SunCrosswordJson> GetExistingSunCrosswords()
         {
             var existingScs = Directory.GetFiles(sunCrosswordDownloadFolder).Select(f => JsonConvert.DeserializeObject<SunCrosswordJson>(File.ReadAllText(f))).ToList();
             return existingScs;
         }
+
+
         private FirebaseClient GetAuthenticatedDatabaseClient()
         {
             return new Firebase.Database.FirebaseClient(firebaseAddress, new Firebase.Database.FirebaseOptions
@@ -126,10 +172,9 @@ namespace Download_Sun_Crossword
                 UploadCrosswordToFirebase(cw);
             }
         }
-        //now using SerializeObject - should test this now works
         private void UploadCrosswordToFirebase(CrosswordModelJson crosswordModel)
         {
-            var lookup = new CrosswordModelLookupJson { datePublished = crosswordModel.datePublished, id = crosswordModel.id, title = crosswordModel.title };
+            var lookup = new CrosswordModelLookupJson {dateStarted=crosswordModel.dateStarted,duration=crosswordModel.duration, datePublished = crosswordModel.datePublished, id = crosswordModel.id, title = crosswordModel.title };
             var firebase = GetAuthenticatedDatabaseClient();
             firebase.Child("crosswords/" + crosswordModel.id).PutAsync(JsonConvert.SerializeObject(crosswordModel)).Wait();
             firebase.Child("crosswordLookups/" + lookup.id).PutAsync(JsonConvert.SerializeObject(lookup)).Wait();
@@ -152,4 +197,17 @@ namespace Download_Sun_Crossword
             return new ServiceAccountCredential(initializer);
         }
     }
+    public class FirebaseUser {
+        public string displayName { get; set; }
+        public string email { get; set; }
+        public bool emailVerfied { get; set; }
+        public bool isAnonymous { get; set; }
+        public string phoneNumber { get; set; }
+        public string photoUrl { get; set; }
+        //prividerData Array of firebase.UserInfo
+        public string providerId { get; set; }
+        public string refreshToken { get; set; }
+        public string uid { get; set; }
+    }
+
 }
