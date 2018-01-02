@@ -30,8 +30,193 @@ namespace Download_Sun_Crossword
         {
             UpdateSunCrosswords();
         }
+        //e.g http://feeds.thesun.co.uk/puzzles/crossword/20180101/40518/  from previousSolutionLink in json file in C:\Users\tonyh\Source\Repos\react-sun-crossword\react-sun-crossword\src\sunCrosswordJsons
+        private void GetMissingCrosswords(string startingSolutionLink)
+        {
 
-        
+            var historicCrossswords = GetHistoricCrosswords(startingSolutionLink);
+            var existingIds=GetExistingCrosswords().Select(c => c.id).ToList();
+
+            var missingCrosswords = historicCrossswords.Where(c => !existingIds.Contains("Sun"+c.data.copy.id)).ToList();
+            SaveSunCrosswords(missingCrosswords);
+            var crosswords = ConvertSunCrosswords(missingCrosswords);
+            SaveConvertedSunCrosswords(crosswords);
+            UploadCrosswordsToFirebase(crosswords);
+            
+        }
+
+        private void DeleteCrosswordById(string id)
+        {
+           GetAuthenticatedDatabaseClient().Child("crosswords/" + id).DeleteAsync().Wait();
+        }
+        private void SyncCrosswordsWithFirebase()
+        {
+            var db = GetAuthenticatedDatabaseClient();
+            //var lookupKeys = db.Child("crosswordLookups").OnceAsync<CrosswordModelLookupJson>().GetAwaiter().GetResult().Select(o=>o.Key);
+            var crosswordKeys = db.Child("crosswords").OnceAsync<CrosswordModelJson>().GetAwaiter().GetResult().Select(o => o.Object.id);
+            var missingCrosswords = GetExistingCrosswords().Where(c => !crosswordKeys.Contains(c.id)).ToList();
+            
+            UploadCrosswordsToFirebase(missingCrosswords);
+        }
+        private List<SunCrosswordJson> GetHistoricCrosswords(string startingSolutionLink)
+        {
+            string previousSolutionLink = startingSolutionLink;
+            WebClient webClient = new WebClient();
+            List<SunCrosswordJson> historicSunJsons = new List<SunCrosswordJson>();
+            Exception exception = null;
+            while (true)
+            {
+                try
+                {
+                    var json = webClient.DownloadString(previousSolutionLink + "/data.json");
+                    var historicJson = JsonConvert.DeserializeObject<SunCrosswordJson>(json);
+                    historicSunJsons.Add(historicJson);
+                    previousSolutionLink = historicJson.data.copy.previoussolutionlink;
+                    if (String.IsNullOrEmpty(previousSolutionLink))
+                    {
+                        break;
+                    }
+                }
+                catch(Exception exc)
+                {
+                    exception = exc;
+                    break;
+                }
+
+            }
+            return historicSunJsons;
+            
+        }
+        private void CluesWithEmbeddedHtml()
+        {
+            var embeddedCrosswordDetails = GetExistingCrosswords().Select(cw =>
+            {
+                var clues = cw.clueProviders.SelectMany(cp => cp.acrossClues.Concat(cp.downClues));
+                var embeddedClues = clues.Where(c => c.text.Contains("<")).ToList();
+                return new
+                {
+                    hasEmbedded = embeddedClues.Count > 0,
+                    embeddedClues = embeddedClues,
+                    crossword = cw
+                };
+            }).Where(a => a.hasEmbedded == true);
+            foreach (var a in embeddedCrosswordDetails)
+            {
+                Debug.WriteLine(a.crossword.title);
+            }
+        }
+        private void CheckClueNumbers()
+        {
+            //26
+            var maxClueNumber=GetExistingCrosswords().SelectMany(cw =>
+            {
+                var cp = cw.clueProviders[0];
+                return cp.acrossClues.Concat(cp.downClues);
+            }).Select(c => int.Parse(c.number)).Max();
+        }
+        private void CluesWithDifferentFormats()//as of 5/7 all clues have the same format
+        {
+            var differentFormatCroswords = GetExistingCrosswords().Select(cw =>
+              {
+                  var clueProviderClues = cw.clueProviders.Select(cp => cp.acrossClues.Concat(cp.downClues).ToList()).ToList();
+
+                  var cluesA = clueProviderClues[0];
+                  var cluesB = clueProviderClues[1];
+                  var differentFormatClues = new List<int>();
+                  for (var i = 0; i < cluesA.Count; i++)
+                  {
+                      var clueA = cluesA[i];
+                      var clueB = cluesB[i];
+                      if (clueA.format != clueB.format)
+                      {
+                          differentFormatClues.Add(int.Parse(clueA.number));
+                      }
+                  }
+                  return new
+                  {
+                      hasDifferentFormats = differentFormatClues.Any(),
+                      differentFormatClues = differentFormatClues,
+                      crosswordId = cw.id
+                  };
+
+              }).Where(a => a.hasDifferentFormats);
+            foreach(var a in differentFormatCroswords)
+            {
+                Debug.WriteLine(a.crosswordId);
+                foreach(var clueNumber in a.differentFormatClues)
+                {
+                    Debug.WriteLine(clueNumber);
+                }
+                Debug.WriteLine("***********************");
+            }
+        }
+        private void CluesWithMultiWordFormat()
+        {
+            var matches = GetExistingCrosswords().Select(cw =>
+            {
+                var formats = cw.clueProviders.SelectMany(cp => cp.acrossClues.Concat(cp.downClues)).Select(c => c.format);
+                var anyMultiple = formats.Any(f =>
+                  {
+                      return f.Contains(",") || f.Contains("-");
+                  });
+                return new { cw = cw, anyMultiple = anyMultiple };
+            }).Where(a => a.anyMultiple==true);
+            foreach(var a in matches)
+            {
+                Debug.WriteLine(a.cw.id);
+            }
+        }
+        private void CheckFormats()
+        {
+            var formats = GetExistingCrosswords().SelectMany(cw =>
+              {
+                  return cw.clueProviders.SelectMany(cp => cp.acrossClues.Concat(cp.downClues)).Select(c => c.format);
+              });
+            Debug.WriteLine("Formats with space: " + formats.Count(f => f.Contains(" ")));
+            var formatsGroupedByType = formats.GroupBy(f =>
+            {
+                var type = "No separators";
+                var containsCommas = f.Contains(",");
+                if (containsCommas)
+                {
+                    type = "Commas";
+                }
+                else
+                {
+                    if (f.Contains("-"))
+                    {
+                        type = "Dash";
+                    }
+                }
+                return type;
+            });
+            foreach(var g in formatsGroupedByType)
+            {
+                Debug.WriteLine(g.Key + ": " + g.Count() + " " + g.First());
+            }
+            var formatsGroupedByPartCount = formats.GroupBy(f =>
+            {
+                var partCount = f.Split(new string[] { "," }, StringSplitOptions.None).Length;
+                if (partCount== 1)
+                {
+                    partCount = f.Split(new string[] { "-" }, StringSplitOptions.None).Length;
+                }
+                return partCount;
+            });
+            foreach (var g in formatsGroupedByType)
+            {
+                Debug.WriteLine(g.Key + ": " + g.Count() + " " + g.First());
+            }
+            foreach (var g in formatsGroupedByPartCount)
+            {
+                Debug.WriteLine(g.Key + ": " + g.Count());
+            }
+        }
+        private List<CrosswordModelJson> GetExistingCrosswords()
+        {
+            var existingScs = Directory.GetFiles(convertedCrosswordFolderPath).Select(f => JsonConvert.DeserializeObject<CrosswordModelJson>(File.ReadAllText(f))).ToList();
+            return existingScs;
+        }
         private void UpdateSunCrosswords()
         {
             var sunCrosswords = GetNewSunCrosswords();
